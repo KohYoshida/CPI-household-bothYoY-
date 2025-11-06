@@ -3,51 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>YoYindex / YoY数量 </title>
-  <style>
-    :root {
-      --bg: #0b0f14;
-      --fg: #e7eef7;
-      --muted: #9fb0c3;
-      --panel: #121821;
-      --grid: #1d2733;
-      --accent1: #4aa3ff; /* index */
-      --accent2: #ffd166; /* yoy_q */
-      --accent3: #ef476f; /* yoy_e */
-    }
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--fg); }
-    header { position: sticky; top: 0; z-index: 2; backdrop-filter: blur(6px); background: rgba(11,15,20,0.75); border-bottom: 1px solid #17202a; }
-    header .inner { max-width: 1200px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-    .hint { color: var(--muted); font-size: 13px; }
-    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    input[type="text"] { padding: 8px 10px; border-radius: 10px; border: 1px solid #233142; background: #0f141b; color: var(--fg); width: 280px; }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
-    .card { background: var(--panel); border: 1px solid #1a2430; border-radius: 14px; padding: 10px 10px 6px; box-shadow: 0 1px 0 #0c1117; }
-    .title { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 8px; font-weight: 600; letter-spacing: .2px; }
-    svg { width: 100%; height: auto; display: block; }
-    .axis path, .axis line { stroke: #2a394b; }
-    .tick text { fill: var(--muted); font-size: 11px; }
-    .gridline { stroke: var(--grid); stroke-width: 1px; }
-    .legend { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); padding: 4px 6px 8px; }
-    .legend .swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; }
-    .dash { background: linear-gradient(90deg, var(--accent2) 60%, transparent 60%); background-size: 8px 3px; }
-    .sw1 { background: var(--accent1); }
-    .sw2 { background: var(--accent2); }
-    .sw3 { background: var(--accent3); }
-    .y0 { stroke: #3a4b61; }
-    .emptystate { color: var(--muted); padding: 24px; }
-  </style>
+  <title>YoYindex / YoY数量</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <div class="inner">
       <div>
-        <div style="font-weight:700">YoYIndex / YoY数量 </div>
+        <div style="font-weight:700">YoYIndex / YoY数量</div>
         <div class="hint">何かわかればいいが・・・。</div>
       </div>
       <div class="controls">
-        <label>CSVファイル名: <input id="csvName" type="text" value="merged.csv" /></label>
+        <label>CSVファイル名: <input id="csvName" type="text" value="merged_yoy.csv" /></label>
         <button id="loadBtn">読み込む</button>
         <span class="hint">🔎 絞り込み: <input id="filter" type="text" placeholder="例: 米 / 肉 / 牛乳 など" /></span>
       </div>
@@ -59,207 +26,9 @@
     <div id="empty" class="emptystate" style="display:none">該当する品目がありません。</div>
   </div>
 
+  <!-- D3 v7 -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-  <script>
-    const PX = { w: 520, h: 220, m: { top: 22, right: 42, bottom: 30, left: 46 } };
-    PX.iw = PX.w - PX.m.left - PX.m.right; // inner width
-    PX.ih = PX.h - PX.m.top - PX.m.bottom; // inner height
-
-    const colors = {
-      index: getComputedStyle(document.documentElement).getPropertyValue('--accent1').trim() || '#4aa3ff',
-      yoy_q: getComputedStyle(document.documentElement).getPropertyValue('--accent2').trim() || '#ffd166',
-      yoy_e: getComputedStyle(document.documentElement).getPropertyValue('--accent3').trim() || '#ef476f',
-    };
-
-    const grid = d3.select('#grid');
-    const empty = d3.select('#empty');
-    const filterInput = document.querySelector('#filter');
-
-    // UI events
-    document.querySelector('#loadBtn').addEventListener('click', () => {
-      const name = document.querySelector('#csvName').value.trim();
-      if (!name) return;
-      loadAndRender(name);
-    });
-
-    filterInput.addEventListener('input', () => {
-      const q = filterInput.value.trim().toLowerCase();
-      d3.selectAll('.card').style('display', function() {
-        const item = this.getAttribute('data-item')?.toLowerCase() || '';
-        return item.includes(q) ? null : 'none';
-      });
-      const visible = d3.selectAll('.card').filter(function(){ return this.style.display !== 'none'; }).size();
-      empty.style('display', visible ? 'none' : null);
-    });
-
-    // Load default once the page is ready
-    window.addEventListener('DOMContentLoaded', () => {
-      loadAndRender(document.querySelector('#csvName').value.trim());
-    });
-
-    async function loadAndRender(csvUrl) {
-      const parseRow = (d) => {
-        // 型を丁寧に整える
-        const row = Object.assign({}, d);
-        // date: ISO 文字列 -> Date
-        row.date = new Date(d.date);
-        // 数値化
-        row.index = num(d.index);
-        row.yoy_q_pct_chg = num(d.yoy_q_pct_chg);
-        row.yoy_e_pct_chg = num(d.yoy_e_pct_chg);
-        row.level_kakei = +d.level_kakei; // 追加: 階層レベル
-        row.code_cpi = +d.code_cpi; 
-        return row;
-      };
-      const num = (v) => (v === null || v === undefined || v === '' ? NaN : +v);
-
-      let data;
-      try {
-        const raw = await d3.csv(csvUrl, parseRow);
-        // フィルタ：必須列と date が有効な行のみ
-        data = raw.filter(r => r.item && r.date instanceof Date && !isNaN(r.date));
-      } catch (e) {
-        console.error(e);
-        grid.html("");
-        empty.style('display', null).text(`CSVの読み込みに失敗しました: ${e.message}`);
-        return;
-      }
-
-      // 品目ごとにグループ
-      const byItem = d3.group(data, d => d.item);
-      // level_kakei=3 を先頭に出すための並び順を作成
-      const pr = v => (v === 3 ? 0 : 1);
-      const items = Array.from(byItem, ([key, arr]) => ({
-        item: key,
-        // その品目のレベル（複数行があっても最大値で代表）
-        lvl: d3.max(arr, d => +d.level_kakei || 0),
-        // その品目の code_cpi（通常は一定だが安全のため最小値で代表）
-        cpi: d3.min(arr, d => +d.code_cpi || Number.POSITIVE_INFINITY)
-      })).sort((a, b) =>
-        // まず level で 3 を最優先
-        (a.lvl === 3 ? 0 : 1) - (b.lvl === 3 ? 0 : 1) ||
-        // 同じグループ内では code_cpi 昇順
-        d3.ascending(a.cpi, b.cpi) ||
-        // 同値の場合の安定化として品目名昇順
-        d3.ascending(a.item, b.item)
-      );
-
-      // 画面初期化
-      grid.html("");
-
-      // 各品目のカードを生成
-      for (const { item, lvl } of items) {
-        const series = byItem.get(item)
-          .filter(d => !isNaN(d.index) || !isNaN(d.yoy_q_pct_chg) || !isNaN(d.yoy_e_pct_chg))
-          .sort((a,b) => d3.ascending(a.date, b.date));
-        if (series.length === 0) continue;
-
-        const card = grid.append('div').attr('class', 'card').attr('data-item', item);
-        const title = card.append('div').attr('class', 'title');
-        title.append('div').text(item);
-        const legend = card.append('div').attr('class', 'legend');
-        legend.html(`
-          <span><span class="swatch sw1"></span>YoY index</span>
-          <span><span class="swatch sw2"></span>YoY 数量</span>
-        `);
-        // <span><span class="swatch sw3"></span>YoY 支出</span>
-
-        const svg = card.append('svg')
-          .attr('viewBox', `0 0 ${PX.w} ${PX.h}`)
-          .attr('preserveAspectRatio', 'xMinYMin meet');
-
-        const g = svg.append('g').attr('transform', `translate(${PX.m.left},${PX.m.top})`);
-
-        // スケール
-        const x = d3.scaleUtc()
-          .domain(d3.extent(series, d => d.date))
-          .range([0, PX.iw]);
-
-        const idxVals = series.map(d => d.index).filter(v => !isNaN(v));
-        const yoyVals = series.flatMap(d => [d.yoy_q_pct_chg, d.yoy_e_pct_chg]).filter(v => !isNaN(v));
-
-        const yL = d3.scaleLinear()
-          .domain(d3.extent(idxVals.length ? idxVals : [0, 1]))
-          .nice()
-          .range([PX.ih, 0]);
-
-        // YoY は 0% を必ず含める
-        const yoyMin = Math.min(0, d3.min(yoyVals.length ? yoyVals : [0]));
-        const yoyMax = Math.max(0, d3.max(yoyVals.length ? yoyVals : [0]));
-        const yR = d3.scaleLinear()
-          .domain([yoyMin, yoyMax]).nice()
-          .range([PX.ih, 0]);
-
-        // グリッドライン（x 年ごと / y 左）
-        const xAxis = d3.axisBottom(x).ticks(d3.timeYear.every(1)).tickFormat(d3.timeFormat('%Y'));
-        const yAxisL = d3.axisLeft(yL).ticks(5);
-        const yAxisR = d3.axisRight(yR).ticks(5).tickFormat(d => `${d}%`);
-
-        // X グリッド
-        g.append('g')
-          .attr('class', 'grid xgrid')
-          .attr('transform', `translate(0,${PX.ih})`)
-          .call(xAxis.tickSize(-PX.ih))
-          .call(g => g.selectAll('.tick line').attr('class', 'gridline'))
-          .call(g => g.select('.domain').remove());
-
-        // 左 Y 軸
-        g.append('g').attr('class', 'axis y left').call(yAxisL);
-        // 右 Y 軸
-        g.append('g').attr('class', 'axis y right').attr('transform', `translate(${PX.iw},0)`).call(yAxisR);
-
-        // 0% ライン（右軸基準）
-        g.append('line')
-          .attr('x1', 0).attr('x2', PX.iw)
-          .attr('y1', yR(0)).attr('y2', yR(0))
-          .attr('stroke', '#2a394b').attr('stroke-dasharray', '3,3');
-
-        // ラインジェネレータ
-        const lineL = d3.line()
-          .defined(d => !isNaN(d.index))
-          .x(d => x(d.date))
-          .y(d => yL(d.index));
-
-        const lineYQ = d3.line()
-          .defined(d => !isNaN(d.yoy_q_pct_chg))
-          .x(d => x(d.date))
-          .y(d => yR(d.yoy_q_pct_chg));
-
-        const lineYE = d3.line()
-          .defined(d => !isNaN(d.yoy_e_pct_chg))
-          .x(d => x(d.date))
-          .y(d => yR(d.yoy_e_pct_chg));
-
-        // 描画
-        g.append('path')
-          .attr('fill', 'none')
-          .attr('stroke', colors.index)
-          .attr('stroke-width', 1.6)
-          .attr('d', lineL(series));
-
-        g.append('path')
-          .attr('fill', 'none')
-          .attr('stroke', colors.yoy_q)
-          .attr('stroke-width', 1.4)
-          .attr('stroke-dasharray', '5,3')
-          .attr('d', lineYQ(series));
-
-        // g.append('path')
-        //   .attr('fill', 'none')
-        //   .attr('stroke', colors.yoy_e)
-        //   .attr('stroke-width', 1.4)
-        //   .attr('d', lineYE(series));
-
-        // X 軸（最後に前面へ）
-        g.append('g')
-          .attr('class', 'axis x')
-          .attr('transform', `translate(0,${PX.ih})`)
-          .call(xAxis);
-      }
-
-      // フィルタの可視性更新
-      filterInput.dispatchEvent(new Event('input'));
-    }
-  </script>
+  <!-- アプリ本体 -->
+  <script src="app.js"></script>
 </body>
 </html>
